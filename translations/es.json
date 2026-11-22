@@ -1,16 +1,24 @@
 {
-  "_meta": { "name": "Español" },
+  "_meta": {
+    "name": "Español"
+  },
   "screen": {
     "choose": "Elige un sensor",
     "no_data": "Sin datos",
     "now": "ahora",
     "minutes": "hace {n} min",
     "hours": "hace {n} h",
-    "insulin": "Insulina activa"
+    "insulin": "Insulina activa",
+    "mgdl": "mg/dL",
+    "mmoll": "mmol/L",
+    "rise_over": "Se espera una subida de más de {range} {unit} en 15 minutos",
+    "rise_in": "Se espera una subida de {range} {unit} en 15 minutos",
+    "fall_over": "Se espera una bajada de más de {range} {unit} en 15 minutos",
+    "fall_in": "Se espera una bajada de {range} {unit} en 15 minutos"
   },
   "app": {
     "name": "Glucosa CGM",
-    "summary": "La lectura de un monitor continuo de glucosa con su flecha de tendencia, cambio y edad, desde los sensores que elijas.",
+    "summary": "La lectura de un monitor continuo de glucosa con su flecha de tendencia, cambio y hora, desde los sensores que elijas.",
     "tile_name": "Glucosa",
     "tile_example": "142, bajando, hace 5 min",
     "opt_glucose": "Sensor de glucosa",
@@ -34,6 +42,12 @@
     "opt_low": "Bajo por debajo de",
     "opt_high": "Alto por encima de",
     "opt_urgent_high": "Alto urgente por encima de",
-    "opt_limit_hint": "En mg/dL. Los límites estándar son 54, 70, 180 y 250."
+    "opt_limit_hint": "En mg/dL. Los límites estándar son 54, 70, 180 y 250.",
+    "opt_show": "Hora y pronóstico",
+    "opt_show_hint": "Qué dice la línea con la hora y si se dibuja la línea de pronóstico bajo la lectura. El pronóstico solo escribe en palabras la flecha de tendencia; no es un cálculo. Ambos aparecen solo si el tile es lo bastante alto.",
+    "show_clock_forecast": "Hora del reloj y pronóstico",
+    "show_clock": "Hora del reloj",
+    "show_age_forecast": "Hace cuánto y pronóstico",
+    "show_age": "Hace cuánto"
   }
 }

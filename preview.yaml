@@ -26,6 +26,14 @@ tiles:
     options: { glucose: sensor.carelink_carelink_last_glucose_level_mg_dl, trend: sensor.carelink_carelink_last_glucose_trend, trend_format: carelink, delta: sensor.carelink_carelink_last_glucose_delta, reading_time: sensor.old_time }
     sizes: [1x1, 2x1]
   - tile: glucose
+    name: Age, no forecast
+    options: { glucose: sensor.carelink_carelink_last_glucose_level_mg_dl, trend: sensor.carelink_carelink_last_glucose_trend, trend_format: carelink, delta: sensor.carelink_carelink_last_glucose_delta, reading_time: sensor.carelink_carelink_last_glucose_update, show: age }
+    sizes: [1x1, 2x1]
+  - tile: glucose
+    name: No unit
+    options: { glucose: sensor.no_unit_glucose, reading_time: sensor.fresh_time }
+    sizes: [1x1, 2x1]
+  - tile: glucose
     name: Nothing chosen
     sizes: [1x1, 2x1]
 
@@ -47,5 +55,7 @@ states:
   sensor.mmol_glucose: { state: "7.9", attributes: { unit_of_measurement: mmol/L } }
   sensor.mmol_rate: { state: "0.05", attributes: { unit_of_measurement: mmol/L/min } }
   sensor.mmol_delta: { state: "0.3", attributes: {} }
+  # A template sensor with no unit: 7.9 is millimoles, not an urgent low.
+  sensor.no_unit_glucose: { state: "7.9", attributes: {} }
   # Nightscout keeps the direction and the time of the reading in attributes of the one sensor.
   sensor.blood_sugar: { state: "118", attributes: { unit_of_measurement: mg/dL, direction: FortyFiveDown, date: "{epoch-3m}" } }

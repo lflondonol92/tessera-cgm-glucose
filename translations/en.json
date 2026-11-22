@@ -1,16 +1,24 @@
 {
-  "_meta": { "name": "English" },
+  "_meta": {
+    "name": "English"
+  },
   "screen": {
     "choose": "Choose a sensor",
     "no_data": "No data",
     "now": "now",
     "minutes": "{n} min ago",
     "hours": "{n} h ago",
-    "insulin": "Active insulin"
+    "insulin": "Active insulin",
+    "mgdl": "mg/dL",
+    "mmoll": "mmol/L",
+    "rise_over": "Expected to rise over {range} {unit} in 15 minutes",
+    "rise_in": "Expected to rise {range} {unit} in 15 minutes",
+    "fall_over": "Expected to fall over {range} {unit} in 15 minutes",
+    "fall_in": "Expected to fall {range} {unit} in 15 minutes"
   },
   "app": {
     "name": "CGM glucose",
-    "summary": "A continuous glucose monitor reading with its trend arrow, change and age, from the sensors you choose.",
+    "summary": "A continuous glucose monitor reading with its trend arrow, change and time, from the sensors you choose.",
     "tile_name": "Glucose",
     "tile_example": "142, falling, 5 min ago",
     "opt_glucose": "Glucose sensor",
@@ -34,6 +42,12 @@
     "opt_low": "Low below",
     "opt_high": "High above",
     "opt_urgent_high": "Urgent high above",
-    "opt_limit_hint": "In mg/dL. The standard limits are 54, 70, 180 and 250."
+    "opt_limit_hint": "In mg/dL. The standard limits are 54, 70, 180 and 250.",
+    "opt_show": "Time and forecast",
+    "opt_show_hint": "What the line with the time says, and whether the forecast line under the reading is drawn. The forecast only spells out the trend arrow; it is not a calculation. Both appear only when the tile is tall enough.",
+    "show_clock_forecast": "Clock time and forecast",
+    "show_clock": "Clock time",
+    "show_age_forecast": "How long ago and forecast",
+    "show_age": "How long ago"
   }
 }

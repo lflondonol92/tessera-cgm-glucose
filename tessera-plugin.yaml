@@ -2,7 +2,7 @@
 # Assistant: the value, a trend arrow, the change since the last reading and how old the reading is.
 # Every name, label and hint below is a key into translations/<language>.json, part "app" (docs/MANIFEST.md).
 id: cgm_glucose
-version: 0.1.0
+version: 0.2.0
 api: "0.15"
 icon: diabetes
 maintainer: lflondonol92
@@ -19,8 +19,8 @@ tiles:
     name: tile_name
     icon: diabetes
     sizes: { min: 1x1, max: 2x2 }
-    # A handful of labels: the value, two arrow icons and three short lines.
-    memory: 700
+    # A handful of labels: the value, two arrow icons, the time, the change, the insulin and a forecast of up to three lines.
+    memory: 900
     example: tile_example
     options:
       # The one sensor that is needed. Its attributes are read too, because some integrations keep the trend
@@ -39,6 +39,18 @@ tiles:
       - { id: delta, kind: entity, domains: [sensor], attributes: [unit_of_measurement], label: opt_delta, hint: opt_delta_hint }
       - { id: reading_time, kind: entity, domains: [sensor], attributes: [], label: opt_reading_time, hint: opt_reading_time_hint }
       - { id: insulin, kind: entity, domains: [sensor], attributes: [unit_of_measurement], label: opt_insulin, hint: opt_insulin_hint }
+      # What the line over the reading says (SugarTV Card's clock time or "relative_time") and whether the forecast line
+      # (the trend arrow in words) is drawn. One choice, because a tile takes at most 12 options before API 0.26.
+      - id: show
+        kind: choice
+        label: opt_show
+        hint: opt_show_hint
+        default: clock_forecast
+        choices:
+          - { value: clock_forecast, label: show_clock_forecast }
+          - { value: clock, label: show_clock }
+          - { value: age_forecast, label: show_age_forecast }
+          - { value: age, label: show_age }
       - { id: stale_after, kind: number, min: 5, max: 60, step: 1, unit: min, default: 15, label: opt_stale_after, hint: opt_stale_after_hint }
       # Where each zone starts, always in mg/dL; a sensor in mmol/L is converted before it is compared.
       - { id: urgent_low, kind: number, min: 30, max: 100, step: 1, unit: "mg/dL", default: 54, label: opt_urgent_low, hint: opt_limit_hint }

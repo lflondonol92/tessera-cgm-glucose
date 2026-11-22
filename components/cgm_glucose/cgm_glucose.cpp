@@ -175,8 +175,9 @@ static long days_from_civil(int y, unsigned m, unsigned d) {
 static constexpr double EPOCH_SECONDS_BOUND = 1e11;
 
 static uint32_t epoch_from_number(double v) {
-  if (!(v > 0)) return 0;
+  if (!(v > 0) || !std::isfinite(v)) return 0;
   if (v >= EPOCH_SECONDS_BOUND) v /= 1000.0;
+  if (v > 4294967295.0) return 0;  // past what 32 bits hold: not a moment
   return static_cast<uint32_t>(v);
 }
 
@@ -230,9 +231,15 @@ static const char *attribute_text(JsonVariantConst v, char *buf, size_t size) {
   return "";
 }
 
-static bool is_mmol(const char *unit) {
-  if (unit == nullptr) return false;
-  char low[12];
+// A sensor with no unit of its own is told apart by its value. A CGM reads 40 mg/dL at the lowest, and a reading in
+// mmol/L never gets past about 33, so a number up to this is millimoles. Without it a 7.9 would be taken for 7.9 mg/dL
+// and shown as an urgent low.
+static constexpr float MMOL_GUESS_MAX = 35.0f;
+
+// Whether a reading is in mmol/L: by the unit when the sensor has one (any spelling that says "mmol"), else by the value.
+static bool is_mmol(const char *unit, bool have_value, float value) {
+  if (unit == nullptr || *unit == '\0') return have_value && value <= MMOL_GUESS_MAX;
+  char low[16];
   size_t n = 0;
   for (const char *p = unit; *p != '\0' && n < sizeof(low) - 1; ++p) {
     char ch = *p;
@@ -240,11 +247,15 @@ static bool is_mmol(const char *unit) {
     low[n++] = ch;
   }
   low[n] = '\0';
-  return strcmp(low, "mmol/l") == 0;
+  return strstr(low, "mmol") != nullptr;
 }
 
-// The tile: the reading in the middle, the trend arrow beside it, then how old it is, the change and the active insulin
-// as far as the height holds them. on_state() reads the entities the person chose; on_tick() moves the age on.
+// The tile, laid out the way SugarTV Card lays out its card: the shape of the slot picks the arrangement.
+//   wider than 5:3   a row:     time  reading  arrow  change
+//   narrower         a column:  time / reading / arrow change
+// with the active insulin above and the forecast under, when the height holds them. The reading is the largest of the
+// screen's fonts that fits; when even the smallest does not hold everything, the change goes first and then the time.
+// on_state() reads the entities the person chose; on_tick() moves the clock on.
 class GlucoseTile : public tessera::Tile {
  public:
   explicit GlucoseTile(const tessera::Plugin *plugin) : plugin_(plugin) {}
@@ -256,21 +267,27 @@ class GlucoseTile : public tessera::Tile {
     trend_format_ = strcmp(format, "carelink") == 0 ? TrendFormat::CARELINK
                     : strcmp(format, "rate") == 0   ? TrendFormat::RATE
                                                     : TrendFormat::TEXT;
+    const char *show = c.options["show"] | "clock_forecast";
+    clock_ = strncmp(show, "clock", 5) == 0;
+    want_forecast_ = strstr(show, "forecast") != nullptr;
     limits_[0] = c.options["urgent_low"] | 54.0f;
     limits_[1] = c.options["low"] | 70.0f;
     limits_[2] = c.options["high"] | 180.0f;
     limits_[3] = c.options["urgent_high"] | 250.0f;
+    // The four limits stand in order, whatever the person set: a low under the urgent low would never show.
+    limits_[1] = std::max(limits_[1], limits_[0]);
+    limits_[2] = std::max(limits_[2], limits_[1]);
+    limits_[3] = std::max(limits_[3], limits_[2]);
     stale_s_ = static_cast<uint32_t>(c.options["stale_after"] | 15) * 60u;
 
     value_ = ui::label(c.parent, Font::VALUE, theme::INK);
     for (lv_obj_t *&a : arrow_) a = ui::label(c.parent, Font::ICON, theme::INK);
-    age_ = ui::label(c.parent, Font::BODY, theme::MUTED);
-    change_label_ = ui::label(c.parent, Font::BODY, theme::INK);
-    insulin_ = ui::label(c.parent, Font::BODY, theme::MUTED);
-    for (lv_obj_t *l : {age_, change_label_, insulin_}) {
-      lv_obj_set_width(l, width_);
-      lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
-    }
+    time_ = ui::label(c.parent, Font::BODY, theme::INK);
+    delta_ = ui::label(c.parent, Font::BODY, theme::INK);
+    insulin_ = ui::label(c.parent, Font::BODY, theme::INK_SOFT);
+    lv_obj_set_style_text_align(insulin_, LV_TEXT_ALIGN_CENTER, 0);
+    forecast_ = ui::text(c.parent, Font::BODY, theme::INK_SOFT);
+    lv_obj_set_style_text_align(forecast_, LV_TEXT_ALIGN_CENTER, 0);
     paint();
   }
 
@@ -284,14 +301,14 @@ class GlucoseTile : public tessera::Tile {
       float v = 0;
       valid_ = parse_number(g["state"] | "", v);
       if (valid_) reading_ = v;
-      mmol_ = is_mmol(g["attributes"]["unit_of_measurement"] | "");
+      mmol_ = is_mmol(g["attributes"]["unit_of_measurement"] | "", valid_, reading_);
     }
 
     trend_ = read_trend(entities, g);
     const uint32_t time = read_time(entities, g);
     read_delta(entities, valid_ ? reading_ : 0.0f, time);
     read_insulin(entities);
-    time_ = time;
+    time_s_ = time;
     paint();
   }
 
@@ -305,9 +322,10 @@ class GlucoseTile : public tessera::Tile {
  private:
   // The trend: the trend sensor if one was chosen, else an attribute of the glucose sensor (Nightscout's direction,
   // LibreView's trend).
-  Trend read_trend(JsonObjectConst entities, JsonObjectConst g) const {
+  Trend read_trend(JsonObjectConst entities, JsonObjectConst g) {
     JsonObjectConst t = entities["trend"];
-    if (!t.isNull()) {
+    trend_source_ = !t.isNull();
+    if (trend_source_) {
       const char *state = t["state"] | "";
       const char *unit = t["attributes"]["unit_of_measurement"] | "";
       if (trend_format_ == TrendFormat::RATE || (strlen(unit) >= 4 && strcmp(unit + strlen(unit) - 4, "/min") == 0))
@@ -345,7 +363,7 @@ class GlucoseTile : public tessera::Tile {
     if (!d.isNull()) {
       float dv = 0;
       if (parse_number(d["state"] | "", dv)) {
-        delta_ = dv;
+        delta_value_ = dv;
         delta_valid_ = true;
       }
       return;
@@ -358,7 +376,7 @@ class GlucoseTile : public tessera::Tile {
     }
     cur_value_ = value;
     if (prev_time_ != 0 && cur_time_ > prev_time_ && cur_time_ - prev_time_ < MAX_DELTA_GAP_S) {
-      delta_ = cur_value_ - prev_value_;
+      delta_value_ = cur_value_ - prev_value_;
       delta_valid_ = true;
     }
   }
@@ -384,7 +402,8 @@ class GlucoseTile : public tessera::Tile {
     return Zone::IN_RANGE;
   }
 
-  // 0 or 1 or 2 arrows, and which icon they are, for the trend.
+  // 0 or 1 or 2 arrows, and which icon they are, for the trend. The icon set has no double chevron: a quick rise or
+  // fall draws its arrow twice.
   static uint32_t arrow_icon(Trend t, int &count) {
     switch (t) {
       case Trend::RISING_QUICKLY: count = 2; return 0xF005D;   // arrow-up
@@ -398,13 +417,14 @@ class GlucoseTile : public tessera::Tile {
     }
   }
 
-  std::string age_text(bool &has_age, bool &stale) const {
-    has_age = false;
+  // The time of the reading as the card says it: the clock time of the reading, or how long ago it was. A clock time
+  // older than half a day says how long ago instead, since a time of day alone would not say which day.
+  std::string time_text(bool &stale) const {
     stale = false;
-    if (epoch_ == 0 || time_ == 0) return "";
-    const uint32_t age = epoch_ > time_ ? epoch_ - time_ : 0;  // a sensor clock ahead of the screen's reads as now
-    has_age = true;
+    if (epoch_ == 0 || time_s_ == 0) return "";
+    const uint32_t age = epoch_ > time_s_ ? epoch_ - time_s_ : 0;  // a sensor clock ahead of the screen's reads as now
     stale = age > stale_s_;
+    if (clock_ && age < 12u * 3600u) return tessera::clock_text(time_s_);
     const long minutes = static_cast<long>(age / 60);
     if (minutes < 1) return plugin_->text("now");
     if (minutes < 60) return tessera::format(plugin_->text("minutes"), minutes);
@@ -413,120 +433,291 @@ class GlucoseTile : public tessera::Tile {
 
   std::string delta_text() const {
     char buf[16];
-    const float a = fabsf(delta_);
+    const float a = fabsf(delta_value_);
     if (mmol_) {
       const float r = roundf(a * 10.0f) / 10.0f;
-      snprintf(buf, sizeof(buf), "%s%.1f", delta_ == 0 ? "" : (delta_ > 0 ? "+" : "-"), r);
+      snprintf(buf, sizeof(buf), "%s%.1f", r == 0 ? "" : (delta_value_ > 0 ? "+" : "-"), r);
     } else {
-      snprintf(buf, sizeof(buf), "%s%ld", delta_ == 0 ? "" : (delta_ > 0 ? "+" : "-"), lroundf(a));
+      snprintf(buf, sizeof(buf), "%s%ld", delta_value_ == 0 ? "" : (delta_value_ > 0 ? "+" : "-"), lroundf(a));
     }
     return buf;
+  }
+
+  // The arrow written out, as SugarTV Card's forecast line: the range each arrow conventionally stands for. It is the
+  // arrow in words, not a calculation.
+  std::string forecast_text() const {
+    const char *key = nullptr, *mgdl = "", *mmol = "";
+    switch (trend_) {
+      case Trend::RISING_QUICKLY: key = "rise_over"; mgdl = "45"; mmol = "2.5"; break;
+      case Trend::RISING: key = "rise_in"; mgdl = "30-45"; mmol = "1.7-2.5"; break;
+      case Trend::RISING_SLIGHTLY: key = "rise_in"; mgdl = "15-30"; mmol = "0.8-1.7"; break;
+      case Trend::FALLING_SLIGHTLY: key = "fall_in"; mgdl = "15-30"; mmol = "0.8-1.7"; break;
+      case Trend::FALLING: key = "fall_in"; mgdl = "30-45"; mmol = "1.7-2.5"; break;
+      case Trend::FALLING_QUICKLY: key = "fall_over"; mgdl = "45"; mmol = "2.5"; break;
+      default: return "";
+    }
+    const std::string text = tessera::fill(plugin_->text(key), "range", mmol_ ? mmol : mgdl);
+    return tessera::fill(text.c_str(), "unit", plugin_->text(mmol_ ? "mmoll" : "mgdl"));
+  }
+
+  // What paint() has worked out to say, before it knows how big anything can be.
+  struct Content {
+    std::string big, time, delta, arrow, insulin, forecast;
+    bool numeric = false, delta_icon = false, arrow_icon = false;
+    int arrows = 0;
+  };
+  // One arrangement to try: a row or a column, which optional parts it keeps, and the font of the reading.
+  struct Plan {
+    bool row;
+    bool time;
+    bool delta;
+    Font face;
+  };
+  // The size of each part in a plan.
+  struct Parts {
+    Font side = Font::BODY, arrow = Font::ICON, change = Font::BODY;
+    int vw = 0, vh = 0, aw = 0, iw = 0, ih = 0, tw = 0, th = 0, dw = 0, dh = 0;
+  };
+
+  Parts parts(const Plan &p, const Content &c) const {
+    Parts m;
+    const bool large = p.face == Font::DIGITS || p.face == Font::VALUE;
+    m.side = large ? Font::BODY_LARGE : Font::BODY;
+    m.arrow = c.arrow_icon ? ((large || p.face == Font::HEADLINE) ? Font::ICON : Font::ICON_SMALL)
+                           : (large ? Font::HEADLINE : Font::BODY);
+    m.change = c.delta_icon ? Font::ICON_SMALL : m.side;
+    m.vh = ui::line_height(p.face);
+    m.vw = ui::text_width(c.big, p.face) + ui::px(2);  // as wide as it is: a plan fits only if the whole text does
+    if (c.arrows > 0) {
+      m.iw = ui::text_width(c.arrow, m.arrow) + ui::px(2);
+      m.ih = ui::line_height(m.arrow);
+      m.aw = c.arrows * m.iw + (c.arrows - 1) * ui::px(2);
+    }
+    if (p.time && !c.time.empty()) {
+      m.tw = ui::text_width(c.time, m.side) + ui::px(2);
+      m.th = ui::line_height(m.side);
+    }
+    if (p.delta && !c.delta.empty()) {
+      m.dw = ui::text_width(c.delta, m.change) + ui::px(2);
+      m.dh = ui::line_height(m.change);
+    }
+    return m;
+  }
+
+  // How wide and how high the parts of a plan stand together.
+  static void measure(const Plan &p, const Parts &m, int &w, int &h) {
+    const int g = ui::px(p.row ? 6 : 4);
+    w = m.vw;
+    h = m.vh;
+    if (p.row) {
+      const int widths[] = {m.tw, m.aw, m.dw};
+      const int heights[] = {m.th, m.ih, m.dh};
+      for (int i = 0; i < 3; ++i) {
+        if (widths[i] <= 0) continue;
+        w += g + widths[i];
+        h = std::max(h, heights[i]);
+      }
+      return;
+    }
+    if (m.tw > 0) {
+      w = std::max(w, m.tw);
+      h += m.th + g;
+    }
+    const int rw = m.aw + (m.aw > 0 && m.dw > 0 ? g : 0) + m.dw;
+    if (rw > 0) {
+      w = std::max(w, rw);
+      h += std::max(m.ih, m.dh) + g;
+    }
+  }
+
+  static void put(lv_obj_t *part, int x, int y, int w) {
+    lv_obj_set_pos(part, x, y);
+    lv_obj_set_width(part, w);
+  }
+
+  // Put the parts of a plan in the box (x0, y0, w, h) that measure() gave. Every position is a number kept here, never
+  // read back from LVGL.
+  void place(const Plan &p, const Parts &m, const Content &c, int x0, int y0, int w, int h) {
+    const int g = ui::px(p.row ? 6 : 4);
+    const int ag = ui::px(2);
+    ui::set_font(time_, m.side);
+    ui::set_text(time_, m.tw > 0 ? c.time : std::string());
+    ui::set_font(delta_, m.change);
+    ui::set_text(delta_, m.dw > 0 ? c.delta : std::string());
+    for (int i = 0; i < 2; ++i) {
+      ui::set_font(arrow_[i], m.arrow);
+      ui::set_text(arrow_[i], i < c.arrows ? c.arrow : std::string());
+    }
+    // The arrows, side by side, from x and with their top at y in a row `rowh` high.
+    auto arrows_at = [&](int x, int y, int rowh) {
+      for (int i = 0; i < c.arrows; ++i) put(arrow_[i], x + i * (m.iw + ag), y + (rowh - m.ih) / 2, m.iw);
+    };
+    if (p.row) {
+      int x = x0;
+      if (m.tw > 0) {
+        put(time_, x, y0 + (h - m.th) / 2, m.tw);
+        x += m.tw + g;
+      }
+      put(value_, x, y0 + (h - m.vh) / 2, m.vw);
+      x += m.vw;
+      if (m.aw > 0) {
+        x += g;
+        arrows_at(x, y0, h);
+        x += m.aw;
+      }
+      if (m.dw > 0) put(delta_, x + g, y0 + (h - m.dh) / 2, m.dw);
+      return;
+    }
+    int y = y0;
+    if (m.tw > 0) {
+      put(time_, x0 + (w - m.tw) / 2, y, m.tw);
+      y += m.th + g;
+    }
+    put(value_, x0 + (w - m.vw) / 2, y, m.vw);
+    y += m.vh + g;
+    const int rw = m.aw + (m.aw > 0 && m.dw > 0 ? g : 0) + m.dw;
+    if (rw > 0) {
+      const int rh = std::max(m.ih, m.dh);
+      int x = x0 + (w - rw) / 2;
+      if (m.aw > 0) {
+        arrows_at(x, y, rh);
+        x += m.aw + g;
+      }
+      if (m.dw > 0) put(delta_, x, y + (rh - m.dh) / 2, m.dw);
+    }
   }
 
   // Set every part from what is known. ui::set_text, set_font and set_tone change a part only when it differs, so this
   // is free to call every second.
   void paint() {
-    bool has_age = false, stale = false;
-    const std::string age = age_text(has_age, stale);
+    bool stale = false;
+    Content c;
+    c.time = time_text(stale);
 
-    std::string big;
     Tone tone = Tone::NORMAL;
-    int arrows = 0;
-    uint32_t icon = 0;
-    const bool numeric = chosen_ && valid_;
+    c.numeric = chosen_ && valid_;
     if (!chosen_) {
-      big = plugin_->text("choose");
+      c.big = plugin_->text("choose");
     } else if (!valid_) {
-      big = plugin_->text("no_data");
+      c.big = plugin_->text("no_data");
     } else {
       char buf[16];
       if (mmol_) snprintf(buf, sizeof(buf), "%.1f", reading_);
       else snprintf(buf, sizeof(buf), "%.0f", reading_);
-      big = buf;
+      c.big = buf;
       const Zone z = zone();
       tone = (z == Zone::URGENT_BELOW || z == Zone::URGENT_ABOVE) ? Tone::ALERT
              : (z == Zone::BELOW || z == Zone::ABOVE)              ? Tone::BUSY
                                                                    : Tone::NORMAL;
-      icon = arrow_icon(trend_, arrows);
+      int n = 0;
+      const uint32_t icon = arrow_icon(trend_, n);
+      if (n > 0) {
+        c.arrows = n;
+        c.arrow = ui::icon(icon);
+        c.arrow_icon = true;
+      } else if (trend_source_) {
+        c.arrows = 1;  // a trend sensor that says nothing the tile knows: a question mark, as SugarTV Card draws
+        c.arrow = "?";
+      }
+      // The change, or the clock that says it is not known yet. An old reading has no change to show.
+      if (!stale) {
+        if (delta_valid_) {
+          c.delta = delta_text();
+        } else {
+          c.delta = ui::icon(0xF0996);  // progress-clock
+          c.delta_icon = true;
+        }
+      }
+      if (insulin_valid_) {
+        char buf2[40];
+        snprintf(buf2, sizeof(buf2), " %.2f %s", insulin_value_, insulin_unit_);
+        c.insulin = std::string(plugin_->text("insulin")) + buf2;
+      }
+      if (want_forecast_) c.forecast = forecast_text();
     }
+    if (!c.numeric) c.time.clear();
     // A reading that has gone old is greyed, whatever zone it was in: it says nothing about now.
     if (stale) tone = Tone::NORMAL;
     const theme::Role ink = stale ? theme::MUTED : theme::INK;
+    const theme::Role soft = stale ? theme::MUTED : theme::INK_SOFT;
 
-    // The arrows' width and the room left for the number.
-    const std::string icon_text = arrows > 0 ? ui::icon(icon) : std::string();
-    const int gap = ui::px(4);
-    const int icon_w = arrows > 0 ? ui::text_width(icon_text, Font::ICON) + ui::px(2) : 0;
-    const int arrows_w = arrows > 0 ? arrows * icon_w + (arrows - 1) * ui::px(2) + gap : 0;
-
-    // The largest of the screen's fonts the number fits in, by width and by height. The digits font has nothing but
-    // digits, signs and the point, so it only takes a reading.
-    Font face = numeric ? Font::DIGITS : Font::HEADLINE;
+    // The arrangement: the slot's shape picks row or column, and the largest font of the screen the parts fit in. The
+    // digits font has nothing but digits, signs and the point, so it only takes a reading. First the big fonts, keeping
+    // every part; then, only if none fits, a smaller font, and the parts go: the change, then the time.
+    const bool wide = width_ * 3 > height_ * 5;
     const Font faces_num[] = {Font::DIGITS, Font::VALUE, Font::HEADLINE, Font::TITLE, Font::BODY_LARGE, Font::BODY};
     const Font faces_word[] = {Font::HEADLINE, Font::TITLE, Font::BODY_LARGE, Font::BODY};
-    const Font *list = numeric ? faces_num : faces_word;
-    const size_t count = numeric ? sizeof(faces_num) / sizeof(Font) : sizeof(faces_word) / sizeof(Font);
-    for (size_t i = 0; i < count; ++i) {
-      face = list[i];
-      if (face == Font::DIGITS && !ui::covers(big, Font::DIGITS)) continue;
-      if (ui::text_width(big, face) + arrows_w <= width_ && ui::line_height(face) <= height_) break;
-    }
-    ui::set_font(value_, face);
-    ui::set_text(value_, big);
-    ui::set_tone(value_, tone, ink);
-
-    // Which of the lines under the number fit the height, in the order of what matters.
-    const int vh = ui::line_height(face);
-    const int row_h = arrows > 0 ? std::max(vh, ui::line_height(Font::ICON)) : vh;
-    const int bh = ui::line_height(Font::BODY);
-    int used = row_h;
-    std::string age_line, delta_line, insulin_line;
-    if (numeric && has_age && used + bh <= height_) {
-      age_line = age;
-      used += bh;
-    }
-    if (numeric && delta_valid_ && !stale && used + bh <= height_) {
-      delta_line = delta_text();
-      used += bh;
-    }
-    if (numeric && insulin_valid_ && used + bh <= height_) {
-      char buf[40];
-      snprintf(buf, sizeof(buf), " %.2f %s", insulin_value_, insulin_unit_);
-      insulin_line = std::string(plugin_->text("insulin")) + buf;
-      used += bh;
-    }
-    ui::set_text(age_, age_line);
-    ui::set_tone(age_, stale ? Tone::BUSY : Tone::NORMAL, theme::MUTED);
-    ui::set_text(change_label_, delta_line);
-    ui::set_tone(change_label_, Tone::NORMAL, ink);
-    ui::set_text(insulin_, insulin_line);
-    ui::set_tone(insulin_, Tone::NORMAL, theme::MUTED);
-
-    // The number and its arrows centred as one, then the lines under them, all centred in the card.
-    const int value_w = std::min(width_, ui::text_width(big, face) + ui::px(2));
-    const int total_w = value_w + arrows_w;
-    const int x0 = std::max(0, (width_ - total_w) / 2);
-    const int top = std::max(0, (height_ - used) / 2);
-    lv_obj_set_width(value_, value_w);
-    lv_obj_set_pos(value_, x0, top + (row_h - vh) / 2);
-    for (int i = 0; i < 2; ++i) {
-      if (i < arrows) {
-        ui::set_text(arrow_[i], icon_text);
-        ui::set_tone(arrow_[i], tone, ink);
-        lv_obj_set_width(arrow_[i], icon_w);
-        lv_obj_set_pos(arrow_[i], x0 + value_w + gap + i * (icon_w + ui::px(2)),
-                       top + (row_h - ui::line_height(Font::ICON)) / 2);
-      } else {
-        ui::set_text(arrow_[i], "");
+    const Font *faces = c.numeric ? faces_num : faces_word;
+    const size_t count = c.numeric ? sizeof(faces_num) / sizeof(Font) : sizeof(faces_word) / sizeof(Font);
+    const Font any = faces[0];
+    const Plan stages[] = {{wide, true, true, any},   {!wide, true, true, any},  {wide, true, false, any},
+                           {!wide, true, false, any}, {!wide, false, false, any}};
+    Plan plan{false, false, false, faces[count - 1]};
+    Parts m = parts(plan, c);
+    int w = 0, h = 0;
+    bool found = false;
+    for (int pass = 0; pass < 2 && !found; ++pass) {
+      const size_t limit = pass == 0 ? count - 2 : count;
+      for (const Plan &stage : stages) {
+        for (size_t i = 0; i < limit && !found; ++i) {
+          Plan p = stage;
+          p.face = faces[i];
+          if (p.face == Font::DIGITS && !ui::covers(c.big, Font::DIGITS)) continue;
+          const Parts pm = parts(p, c);
+          int pw = 0, ph = 0;
+          measure(p, pm, pw, ph);
+          if (pw <= width_ && ph <= height_) {
+            plan = p;
+            m = pm;
+            w = pw;
+            h = ph;
+            found = true;
+          }
+        }
+        if (found) break;
       }
     }
-    // A line that is empty takes no room, so the ones that are shown stand together under the number.
-    int y = top + row_h;
-    const std::string *texts[] = {&age_line, &delta_line, &insulin_line};
-    lv_obj_t *lines[] = {age_, change_label_, insulin_};
-    for (int i = 0; i < 3; ++i) {
-      lv_obj_set_pos(lines[i], 0, y);
-      if (!texts[i]->empty()) y += bh;
+    if (!found) {
+      m.vw = std::min(m.vw, width_);  // nothing holds it whole: the label cuts it with dots
+      measure(plan, m, w, h);
+    }
+
+    // What the height has left: the insulin above the reading, then the forecast under it.
+    const int bh = ui::line_height(Font::BODY);
+    const int gap = ui::px(4);
+    int room = height_ - h;
+    const bool with_insulin = !c.insulin.empty() && room >= bh + gap;
+    if (with_insulin) room -= bh + gap;
+    int forecast_lines = 0;
+    if (!c.forecast.empty()) {
+      // A forecast wraps; a word that breaks wastes some of every line, so it counts a tenth more.
+      const int lines = std::max(1, (ui::text_width(c.forecast, Font::BODY) * 11 / 10 + width_ - 1) / width_);
+      if (lines <= 3 && room >= lines * bh + gap) forecast_lines = lines;
+    }
+    const int total = h + (with_insulin ? bh + gap : 0) + (forecast_lines > 0 ? forecast_lines * bh + gap : 0);
+    int y = std::max(0, (height_ - total) / 2);
+
+    ui::set_text(insulin_, with_insulin ? c.insulin : std::string());
+    ui::set_tone(insulin_, Tone::NORMAL, soft);
+    if (with_insulin) {
+      put(insulin_, 0, y, width_);
+      y += bh + gap;
+    }
+
+    ui::set_font(value_, plan.face);
+    ui::set_text(value_, c.big);
+    ui::set_tone(value_, tone, ink);
+    place(plan, m, c, std::max(0, (width_ - w) / 2), y, w, h);
+    for (lv_obj_t *a : arrow_) ui::set_tone(a, tone, ink);
+    ui::set_tone(time_, Tone::NORMAL, ink);
+    ui::set_tone(delta_, Tone::NORMAL, c.delta_icon ? theme::MUTED : ink);
+    y += h;
+
+    ui::set_text(forecast_, forecast_lines > 0 ? c.forecast : std::string());
+    ui::set_tone(forecast_, Tone::NORMAL, soft);
+    if (forecast_lines > 0) {
+      lv_obj_set_pos(forecast_, 0, y + gap);
+      lv_obj_set_size(forecast_, width_, forecast_lines * bh);
     }
   }
 
@@ -536,16 +727,17 @@ class GlucoseTile : public tessera::Tile {
 
   // The options.
   TrendFormat trend_format_ = TrendFormat::TEXT;
+  bool clock_ = true, want_forecast_ = true;
   float limits_[4] = {54, 70, 180, 250};
   uint32_t stale_s_ = 15 * 60;
 
   // What the entities said.
-  bool chosen_ = false, valid_ = false, mmol_ = false;
+  bool chosen_ = false, valid_ = false, mmol_ = false, trend_source_ = false;
   float reading_ = 0;  // in the glucose sensor's own unit
   Trend trend_ = Trend::UNKNOWN;
-  uint32_t time_ = 0;
+  uint32_t time_s_ = 0;  // when the reading was taken
   bool delta_valid_ = false;
-  float delta_ = 0;
+  float delta_value_ = 0;
   bool insulin_valid_ = false;
   float insulin_value_ = 0;
   char insulin_unit_[12] = "U";
@@ -554,7 +746,7 @@ class GlucoseTile : public tessera::Tile {
   float cur_value_ = 0, prev_value_ = 0;
   uint32_t cur_time_ = 0, prev_time_ = 0;
 
-  lv_obj_t *value_{}, *arrow_[2]{}, *age_{}, *change_label_{}, *insulin_{};
+  lv_obj_t *value_{}, *arrow_[2]{}, *time_{}, *delta_{}, *insulin_{}, *forecast_{};
 };
 
 void CgmGlucose::setup() {
