@@ -1,0 +1,39 @@
+{
+  "_meta": { "name": "Español" },
+  "screen": {
+    "choose": "Elige un sensor",
+    "no_data": "Sin datos",
+    "now": "ahora",
+    "minutes": "hace {n} min",
+    "hours": "hace {n} h",
+    "insulin": "Insulina activa"
+  },
+  "app": {
+    "name": "Glucosa CGM",
+    "summary": "La lectura de un monitor continuo de glucosa con su flecha de tendencia, cambio y edad, desde los sensores que elijas.",
+    "tile_name": "Glucosa",
+    "tile_example": "142, bajando, hace 5 min",
+    "opt_glucose": "Sensor de glucosa",
+    "opt_glucose_hint": "El sensor con la lectura, en mg/dL o mmol/L. Es el único obligatorio.",
+    "opt_trend": "Sensor de tendencia",
+    "opt_trend_hint": "Opcional. Un sensor con la tendencia como palabra o código (UP, DOWN, Flat, Rising...) o como tasa por minuto. Si está vacío, el tile busca un atributo direction o trend en el sensor de glucosa.",
+    "opt_trend_format": "Valores de tendencia",
+    "opt_trend_format_hint": "Cómo leer el sensor de tendencia. Elige Carelink para Medtronic, donde NONE significa estable.",
+    "format_text": "Palabras o códigos",
+    "format_carelink": "Carelink (NONE es estable)",
+    "format_rate": "Tasa de cambio por minuto",
+    "opt_delta": "Sensor de cambio",
+    "opt_delta_hint": "Opcional. El cambio respecto a la lectura anterior, en la unidad del sensor de glucosa (Carelink tiene uno). Si está vacío, el tile lo calcula cuando ve dos lecturas separadas por menos de nueve minutos.",
+    "opt_reading_time": "Sensor de hora de lectura",
+    "opt_reading_time_hint": "Opcional. Un sensor con la hora de la lectura, como Last glucose update de Carelink. Si está vacío, usa el momento en que Home Assistant recibió el sensor de glucosa, que puede llegar unos minutos tarde.",
+    "opt_insulin": "Sensor de insulina activa",
+    "opt_insulin_hint": "Opcional. Muestra una línea con la insulina activa cuando el tile es lo bastante alto.",
+    "opt_stale_after": "Lectura vieja después de",
+    "opt_stale_after_hint": "Minutos sin una lectura nueva antes de atenuar el valor. Quince sirve para un sensor que reporta cada cinco minutos.",
+    "opt_urgent_low": "Bajo urgente por debajo de",
+    "opt_low": "Bajo por debajo de",
+    "opt_high": "Alto por encima de",
+    "opt_urgent_high": "Alto urgente por encima de",
+    "opt_limit_hint": "En mg/dL. Los límites estándar son 54, 70, 180 y 250."
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "_meta": { "name": "English" },
+  "screen": {
+    "choose": "Choose a sensor",
+    "no_data": "No data",
+    "now": "now",
+    "minutes": "{n} min ago",
+    "hours": "{n} h ago",
+    "insulin": "Active insulin"
+  },
+  "app": {
+    "name": "CGM glucose",
+    "summary": "A continuous glucose monitor reading with its trend arrow, change and age, from the sensors you choose.",
+    "tile_name": "Glucose",
+    "tile_example": "142, falling, 5 min ago",
+    "opt_glucose": "Glucose sensor",
+    "opt_glucose_hint": "The sensor with the reading, in mg/dL or mmol/L. It is the only one you must choose.",
+    "opt_trend": "Trend sensor",
+    "opt_trend_hint": "Optional. A sensor with the trend as a word or code (UP, DOWN, Flat, Rising...) or as a rate per minute. Left empty, the tile looks for a direction or trend attribute on the glucose sensor.",
+    "opt_trend_format": "Trend values",
+    "opt_trend_format_hint": "How to read the trend sensor. Pick Carelink for Medtronic, where NONE means steady.",
+    "format_text": "Words or codes",
+    "format_carelink": "Carelink (NONE is steady)",
+    "format_rate": "Rate of change per minute",
+    "opt_delta": "Change sensor",
+    "opt_delta_hint": "Optional. The change since the previous reading, in the unit of the glucose sensor (Carelink has one). Left empty, the tile works it out when it sees two readings less than nine minutes apart.",
+    "opt_reading_time": "Reading time sensor",
+    "opt_reading_time_hint": "Optional. A sensor with the time of the reading, such as Carelink's Last glucose update. Left empty, the tile uses the moment Home Assistant last heard from the glucose sensor, which can be a few minutes late.",
+    "opt_insulin": "Active insulin sensor",
+    "opt_insulin_hint": "Optional. Shows a line with the insulin on board when the tile is tall enough.",
+    "opt_stale_after": "Old reading after",
+    "opt_stale_after_hint": "Minutes without a new reading before the tile greys the value. Fifteen suits a sensor that reports every five minutes.",
+    "opt_urgent_low": "Urgent low below",
+    "opt_low": "Low below",
+    "opt_high": "High above",
+    "opt_urgent_high": "Urgent high above",
+    "opt_limit_hint": "In mg/dL. The standard limits are 54, 70, 180 and 250."
+  }
+}

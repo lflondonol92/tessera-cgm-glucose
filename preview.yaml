@@ -1,0 +1,51 @@
+# What tools/preview.py shows (docs/PREVIEW.md): a Medtronic Carelink setup with the entities and states of a real
+# installation, then the zones, a sensor in mmol/L, an old reading and a tile with nothing chosen yet.
+tiles:
+  - tile: glucose
+    name: Carelink
+    options: { glucose: sensor.carelink_carelink_last_glucose_level_mg_dl, trend: sensor.carelink_carelink_last_glucose_trend, trend_format: carelink, delta: sensor.carelink_carelink_last_glucose_delta, reading_time: sensor.carelink_carelink_last_glucose_update, insulin: sensor.carelink_carelink_active_insulin }
+    sizes: [1x1, 2x1, 2x2]
+  - tile: glucose
+    name: Urgent low
+    options: { glucose: sensor.low_glucose, trend: sensor.low_trend, trend_format: carelink, delta: sensor.low_delta, reading_time: sensor.fresh_time }
+    sizes: [1x1, 2x1]
+  - tile: glucose
+    name: High, rising quickly
+    options: { glucose: sensor.high_glucose, trend: sensor.high_trend, delta: sensor.high_delta, reading_time: sensor.fresh_time }
+    sizes: [1x1, 2x2]
+  - tile: glucose
+    name: Millimoles
+    options: { glucose: sensor.mmol_glucose, trend: sensor.mmol_rate, trend_format: rate, delta: sensor.mmol_delta, reading_time: sensor.fresh_time }
+    sizes: [1x1, 2x1]
+  - tile: glucose
+    name: Nightscout attributes
+    options: { glucose: sensor.blood_sugar }
+    sizes: [2x1]
+  - tile: glucose
+    name: Old reading
+    options: { glucose: sensor.carelink_carelink_last_glucose_level_mg_dl, trend: sensor.carelink_carelink_last_glucose_trend, trend_format: carelink, delta: sensor.carelink_carelink_last_glucose_delta, reading_time: sensor.old_time }
+    sizes: [1x1, 2x1]
+  - tile: glucose
+    name: Nothing chosen
+    sizes: [1x1, 2x1]
+
+states:
+  # The five sensors of a Medtronic Carelink installation, as Home Assistant has them.
+  sensor.carelink_carelink_last_glucose_level_mg_dl: { state: "142", attributes: { unit_of_measurement: mg/dL, device_class: blood_glucose_concentration } }
+  sensor.carelink_carelink_last_glucose_trend: { state: "DOWN", attributes: {} }
+  sensor.carelink_carelink_last_glucose_delta: { state: "-10.0", attributes: {} }
+  sensor.carelink_carelink_last_glucose_update: { state: "{epoch-5m}", attributes: {} }
+  sensor.carelink_carelink_active_insulin: { state: "1.15", attributes: {} }
+  sensor.fresh_time: { state: "{epoch-2m}", attributes: {} }
+  sensor.old_time: { state: "{epoch-40m}", attributes: {} }
+  sensor.low_glucose: { state: "48", attributes: { unit_of_measurement: mg/dL } }
+  sensor.low_trend: { state: "DOWN", attributes: {} }
+  sensor.low_delta: { state: "-7.0", attributes: {} }
+  sensor.high_glucose: { state: "268", attributes: { unit_of_measurement: mg/dL } }
+  sensor.high_trend: { state: "DoubleUp", attributes: {} }
+  sensor.high_delta: { state: "21", attributes: {} }
+  sensor.mmol_glucose: { state: "7.9", attributes: { unit_of_measurement: mmol/L } }
+  sensor.mmol_rate: { state: "0.05", attributes: { unit_of_measurement: mmol/L/min } }
+  sensor.mmol_delta: { state: "0.3", attributes: {} }
+  # Nightscout keeps the direction and the time of the reading in attributes of the one sensor.
+  sensor.blood_sugar: { state: "118", attributes: { unit_of_measurement: mg/dL, direction: FortyFiveDown, date: "{epoch-3m}" } }
